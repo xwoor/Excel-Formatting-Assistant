@@ -12,6 +12,14 @@
 </template>
 
 <script setup>
+/**
+ * @typedef {Object} FileUploadSectionProps
+ * @property {boolean} isLoading - Indicates if a file is currently being processed or loaded.
+ */
+
+/**
+ * @property {FileUploadSectionProps} props
+ */
 defineProps({
   isLoading: {
     type: Boolean,
@@ -21,6 +29,12 @@ defineProps({
 
 const emit = defineEmits(['file-uploaded']);
 
+/**
+ * Handles the file upload event.
+ * Emits a 'file-uploaded' event with the selected file.
+ * @param {Event} event - The DOM event from the file input.
+ * @emits {File} file-uploaded - The selected file object.
+ */
 const handleFileUpload = (event) => {
   emit('file-uploaded', event.target.files[0]);
 };
