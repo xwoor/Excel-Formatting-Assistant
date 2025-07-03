@@ -1,0 +1,18 @@
+:root {
+  --bs-primary: #2A7ADE;
+  --bs-secondary: #0A408F;
+  --bs-light: #F8F9FA;
+  --bs-border-color: #CED4DA;
+  --bs-body-color: #212529;
+  --bs-body-bg: #FFFFFF;
+}
+
+/* Override Bootstrap variables */
+$primary: var(--bs-primary);
+$secondary: var(--bs-secondary);
+$light: var(--bs-light);
+$border-color: var(--bs-border-color);
+$body-color: var(--bs-body-color);
+$body-bg: var(--bs-body-bg);
+
+@import "bootstrap/scss/bootstrap.scss";

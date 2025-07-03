@@ -1,18 +1,18 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import * as XLSX from 'xlsx';
+
+import InfoSection from './components/InfoSection.vue';
+import FileUploadSection from './components/FileUploadSection.vue';
+import ExportOptionsSection from './components/ExportOptionsSection.vue';
+import ColumnMappingSection from './components/ColumnMappingSection.vue';
 
 const excelData = ref([]);
 const headers = ref([]);
-const columnMapping = ref({}); // To store column mapping
+const isLoading = ref(false);
 const selectedFormat = ref('xlsx'); // Default export format
 
-const customTemplates = ref([]);
-const newTemplateName = ref('');
-const newTemplateHeadersInput = ref('');
-const selectedTemplate = ref('audio-import'); // 'audio-import' or name of custom template
-
-// Fixed template headers
+// Fixed template headers (Audio Import)
 const fixedTemplateHeaders = [
   'product-title', 'product-clean-title', 'product-title-version', 'product-artists-and-roles',
   'product-label', 'product-catid', 'product-upc', 'product-digital-street',
@@ -30,85 +30,53 @@ const fixedTemplateHeaders = [
   'work-youtubecustomid', 'asset-youtubecustomid'
 ];
 
-const templateHeaders = computed(() => {
-  if (selectedTemplate.value === 'fixed') {
-    return fixedTemplateHeaders;
-  } else {
-    const custom = customTemplates.value.find(t => t.name === selectedTemplate.value);
-    return custom ? custom.headers : [];
-  }
+// Initialize columnMapping with default structure for all fixedTemplateHeaders
+const initialColumnMapping = {};
+fixedTemplateHeaders.forEach(templateCol => {
+  initialColumnMapping[templateCol] = {
+    source: '',
+    defaultValue: ''
+  };
 });
+const columnMapping = ref(initialColumnMapping);
 
-const loadCustomTemplates = () => {
-  const storedTemplates = localStorage.getItem('customExcelTemplates');
-  if (storedTemplates) {
-    customTemplates.value = JSON.parse(storedTemplates);
+const templateHeaders = computed(() => fixedTemplateHeaders); // Always use fixed template headers
+
+// Column names that are expected to contain dates and need formatting
+const dateColumns = [
+  'product-digital-street',
+  'product-physical-street',
+  'product-original-street',
+  'sunrise'
+];
+
+// Function to convert Excel serial date to readable date (YYYY-MM-DD)
+const excelSerialDateToJSDate = (serial) => {
+  if (typeof serial !== 'number' || isNaN(serial)) {
+    return '';
   }
+  const date = new Date(Math.round((serial - 25569) * 86400 * 1000));
+  return date.toISOString().split('T')[0];
 };
 
-const saveCustomTemplate = () => {
-  if (newTemplateName.value && newTemplateHeadersInput.value) {
-    const headersArray = newTemplateHeadersInput.value.split(',').map(h => h.trim()).filter(h => h);
-    if (headersArray.length > 0) {
-      // Check if template name already exists for editing
-      const existingIndex = customTemplates.value.findIndex(t => t.name === newTemplateName.value);
-      if (existingIndex !== -1) {
-        // Update existing template
-        customTemplates.value[existingIndex].headers = headersArray;
-        alert('Template updated successfully!');
-      } else {
-        // Add new template
-        customTemplates.value.push({
-          name: newTemplateName.value,
-          headers: headersArray
-        });
-        alert('Template saved successfully!');
-      }
-      localStorage.setItem('customExcelTemplates', JSON.stringify(customTemplates.value));
-      newTemplateName.value = '';
-      newTemplateHeadersInput.value = '';
-      // Automatically select the newly saved/updated template
-      selectedTemplate.value = newTemplateName.value;
-      resetMapping();
+const resetMapping = () => {
+  // Only update sources based on new headers, keep default values if set
+  templateHeaders.value.forEach(templateCol => {
+    if (headers.value.includes(templateCol)) {
+      columnMapping.value[templateCol].source = templateCol;
     } else {
-      alert('Please enter valid headers for the template.');
+      columnMapping.value[templateCol].source = ''; // Clear source if not found
     }
-  } else {
-    alert('Please enter both template name and headers.');
-  }
+  });
 };
 
-const editCustomTemplate = (template) => {
-  newTemplateName.value = template.name;
-  newTemplateHeadersInput.value = template.headers.join(', ');
-};
-
-const deleteCustomTemplate = (templateName) => {
-  if (confirm(`Are you sure you want to delete the template "${templateName}"?`)) {
-    customTemplates.value = customTemplates.value.filter(t => t.name !== templateName);
-    localStorage.setItem('customExcelTemplates', JSON.stringify(customTemplates.value));
-    if (selectedTemplate.value === templateName) {
-      selectedTemplate.value = 'audio-import'; // Fallback to fixed template if deleted
-      resetMapping();
-    }
-    alert('Template deleted successfully!');
-  }
-};
-
-// Load templates on component mount
-import { onMounted, computed, watch } from 'vue';
 onMounted(() => {
-  loadCustomTemplates();
+  resetMapping(); // Initialize mapping on component mount
 });
 
-// Watch for changes in selectedTemplate and reset mapping
-watch(selectedTemplate, () => {
-  resetMapping();
-});
-
-const handleFileUpload = (event) => {
-  const file = event.target.files[0];
+const handleFileUpload = (file) => {
   if (file) {
+    isLoading.value = true; // Set loading to true
     const reader = new FileReader();
     reader.onload = (e) => {
       const data = new Uint8Array(e.target.result);
@@ -120,8 +88,9 @@ const handleFileUpload = (event) => {
       if (jsonData.length > 0) {
         headers.value = jsonData[0];
         excelData.value = jsonData.slice(1);
-        resetMapping(); // Inicializa el mapeo después de cargar las cabeceras
+        resetMapping(); // Re-initialize mapping after loading new headers
       }
+      isLoading.value = false; // Set loading to false after processing
     };
     reader.readAsArrayBuffer(file);
   }
@@ -143,7 +112,7 @@ const downloadProcessedFile = () => {
         value = mapping.defaultValue;
       }
 
-      // Formatear fechas si la columna es una de las columnas de fecha esperadas
+      // Format dates if the column is one of the expected date columns
       if (dateColumns.includes(templateCol)) {
         value = excelSerialDateToJSDate(value);
       }
@@ -157,7 +126,7 @@ const downloadProcessedFile = () => {
   const newWorkbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(newWorkbook, newWorksheet, 'Sheet1');
 
-  // Descargar el nuevo archivo
+  // Download the new file
   if (selectedFormat.value === 'xlsx') {
     XLSX.writeFile(newWorkbook, 'processed_data.xlsx');
   } else if (selectedFormat.value === 'csv') {
@@ -171,99 +140,38 @@ const downloadProcessedFile = () => {
     document.body.removeChild(link);
   }
 };
+
+const updateColumnMapping = (newMapping) => {
+  columnMapping.value = newMapping;
+};
 </script>
 
 <template>
   <div class="container py-4">
-    <div class="card shadow-lg p-4 p-md-5">
-      <h1 class="text-center mb-4">Excel Formatting Assistant</h1>
+    <div class="card shadow-lg p-4 p-md-5 my-4">
+      <img src="/public/logo.png" width="250px" class="m-auto pb-4" alt="Excel Formatting Assistant">
+      <InfoSection />
 
-      <div class="border border-dashed border-secondary rounded p-4 text-center mb-4">
-        <p class="text-muted mb-2">Drag and drop your Excel file here or click to select</p>
-        <input type="file" @change="handleFileUpload" class="d-none" id="file-upload" />
-        <label for="file-upload" class="btn btn-primary">
-          Select File
-        </label>
-      </div>
+      <FileUploadSection :isLoading="isLoading" @file-uploaded="handleFileUpload" />
 
-      <div class="mb-4">
-        <h2 class="mb-3">Template Management</h2>
-        <div class="row g-3 mb-3">
-          <div class="col-md-6">
-            <label for="newTemplateName" class="form-label">New Template Name:</label>
-            <input type="text" id="newTemplateName" v-model="newTemplateName" class="form-control" placeholder="e.g., My Custom Template" />
-          </div>
-          <div class="col-md-6">
-            <label for="newTemplateHeaders" class="form-label">New Template Headers (comma-separated):</label>
-            <input type="text" id="newTemplateHeaders" v-model="newTemplateHeadersInput" class="form-control" placeholder="header1, header2, header3" />
-          </div>
-        </div>
-        <button @click="saveCustomTemplate" class="btn btn-secondary mb-4">Save Custom Template</button>
+      <!-- Export Options (moved for accessibility) -->
+      <ExportOptionsSection
+        :selectedFormat="selectedFormat"
+        @update:selectedFormat="selectedFormat = $event"
+        @download-file="downloadProcessedFile"
+      />
 
-        <h3 class="mb-2">Select Template:</h3>
-        <div class="d-flex align-items-center mb-3">
-          <select v-model="selectedTemplate" @change="resetMapping" class="form-select me-2">
-            <option value="audio-import">Audio Import</option>
-            <option v-for="template in customTemplates" :key="template.name" :value="template.name">{{ template.name }}</option>
-          </select>
-          <button
-            v-if="selectedTemplate !== 'audio-import'"
-            @click="editCustomTemplate(customTemplates.find(t => t.name === selectedTemplate))"
-            class="btn btn-info btn-sm me-2"
-          >
-            Edit
-          </button>
-          <button
-            v-if="selectedTemplate !== 'audio-import'"
-            @click="deleteCustomTemplate(selectedTemplate)"
-            class="btn btn-danger btn-sm"
-          >
-            Delete
-          </button>
-        </div>
-      </div>
+      <!-- Column Mapping Section (always visible) -->
+      <ColumnMappingSection
+        :templateHeaders="templateHeaders"
+        :availableHeaders="headers"
+        :columnMapping="columnMapping"
+        @update:columnMapping="updateColumnMapping"
+      />
 
-      <div v-if="excelData.length > 0" class="mt-4">
-        <h2 class="mb-3">Column Mapping</h2>
-        <div class="row g-3 mb-4">
-          <div v-for="templateCol in templateHeaders" :key="templateCol" class="col-md-4">
-            <label :for="templateCol" class="form-label">{{ templateCol }}</label>
-            <select
-              :id="templateCol"
-              v-model="columnMapping[templateCol].source"
-              class="form-select mb-2"
-            >
-              <option value="">-- Select Column --</option>
-              <option v-for="header in headers" :key="header" :value="header">{{ header }}</option>
-            </select>
-            <input
-              type="text"
-              v-model="columnMapping[templateCol].defaultValue"
-              class="form-control"
-              placeholder="Default Value (optional)"
-            />
-          </div>
-        </div>
-
-        <div class="d-flex justify-content-between align-items-center mb-4">
-          <h2 class="mb-0">Data Preview</h2>
-          <div class="d-flex align-items-center">
-            <div class="me-3">
-              <label for="export-format" class="form-label mb-0">Export Format:</label>
-              <select
-                id="export-format"
-                v-model="selectedFormat"
-                class="form-select form-select-sm"
-              >
-                <option value="xlsx">Excel (xlsx)</option>
-                <option value="csv">CSV (csv)</option>
-              </select>
-            </div>
-            <button @click="downloadProcessedFile" class="btn btn-success">
-              Download Processed File
-            </button>
-          </div>
-        </div>
+      <!-- Data Preview Section (only visible if excelData is available) -->
+      <div v-if="excelData.length > 0" class="mt-4 pt-4 border-top">
+        <h2 class="mb-3">Data Preview</h2>
         <div class="table-responsive mb-4">
           <table class="table table-bordered table-hover">
             <thead>
